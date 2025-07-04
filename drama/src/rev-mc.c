@@ -364,6 +364,7 @@ uint64_t find_row_mask(std  ::vector<set_t>& sets, std::vector<uint64_t> fn_mask
     }
     verbose_printerr("[LOG] - Row mask: 0x%0lx \t\t bits: %s\n", row_mask, bit_string(row_mask));	
     printf("0x%lx\n", row_mask);
+    return 0;
 
 }
 
@@ -483,6 +484,7 @@ std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_f
         function_num++;
         //输出本bank_function的统计数据,加一个判断bank_function正确与否的值!
     }
+    return 0;
 }
 
 //----------------------------------------------------------
@@ -564,7 +566,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     if (flags & F_VERBOSE) {
         print_sets(sets);
     }
-std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_fn_bits, size_t msb, uint64_t flags) 
+    Check_bank_functions(std::vector<set_t> sets, size_t max_fn_bits, size_t msb, uint64_t flags) 
     //fn_masks = find_functions(sets, 2, 30, flags);
     //uint64_t row_mask = find_row_mask(sets, fn_masks, mem, threshold, flags);
 
