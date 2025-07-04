@@ -29,6 +29,12 @@
 #define BITSET_SIZE 256  // bitset used to exploit bitwise operations 
 #define ROW_SET_CNT 5
 
+#define Bank0_addr ((1ULL << 6) ^ (1ULL << 13))  // 0x2040 (a_6 ^ a_13)
+#define Bank1_addr ((1ULL << 14) ^ (1ULL << 17)) // 0x24000 (a_14 ^ a_17)
+#define Bank2_addr ((1ULL << 15) ^ (1ULL << 18)) // 0x48000 (a_15 ^ a_18)
+#define Bank3_addr ((1ULL << 16) ^ (1ULL << 19)) // 0x90000 (a_16 ^ a_19)
+
+
 // from https://stackoverflow.com/questions/1644868/define-macro-for-debug-printing-in-c
 #define verbose_printerr(fmt, ...) \
 	do { if (flags & F_VERBOSE) { fprintf(stderr, fmt, ##__VA_ARGS__); } } while(0)
@@ -36,6 +42,7 @@
 
 
 typedef std::vector<addr_tuple> set_t; //定义一个存放addr_tuple地址对的集合体，存放存在bank conflict的地址
+typedef std::vector<mask_type>  type_t; //用于后面查看不同的映射的效果
 
 //-------------------------------------------
 //5个Helper函数
@@ -360,6 +367,124 @@ uint64_t find_row_mask(std  ::vector<set_t>& sets, std::vector<uint64_t> fn_mask
 
 }
 
+//负责将掩码结果转换为0,1,2,3等提纯的数据
+uint64_t num_transfer(uint64_t binary_num,int function_num) {
+    uint64_t result = 0;
+    if(function_num == 0){
+        if(binary_num&(1ULL<<6)){
+            result += 1;
+        }
+        if (binary_num&(1ULL<<13))
+        {       
+            result += 2;
+        }
+        return result;
+    }
+    else if (function_num == 1){
+        if(binary_num&(1ULL<<14)){
+            result += 1;
+        }
+        if (binary_num&(1ULL<<17))
+        {       
+            result += 2;
+        }
+        return result;
+    }
+    else if (function_num == 2){
+        if(binary_num&(1ULL<<15)){
+            result += 1;
+        }
+        if (binary_num&(1ULL<<18))
+        {       
+            result += 2;
+        }
+        return result;
+    }
+    else if (function_num == 3){
+        if(binary_num&(1ULL<<16)){
+            result += 1;
+        }
+        if (binary_num&(1ULL<<19))
+        {       
+            result += 2;
+        }
+        return result;
+    }
+    result = 4;
+    return result;
+}
+//----------------------------------------------------------
+//验证Bank Function的正确性
+std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_fn_bits, size_t msb, uint64_t flags) {
+    std::vector<uint64_t> result_masks; //用于存储验证通过的掩码，尽管这里主要目的是输出统计
+    std::vector<uint64_t> bank_functions_to_check = {
+        //待检测的bank掩码
+        Bank0_addr,
+        Bank1_addr,
+        Bank2_addr,
+        Bank3_addr
+    };
+    type_t mask_result_statistic= {
+        {0, 0}, // 第一个mask_type: type=0, num=0
+        {1, 0}, // 第二个mask_type: type=1, num=0
+        {2, 0}, // 第三个mask_type: type=2, num=0
+        {3, 0}  // 第四个mask_type: type=3, num=0
+    };
+    
+    int function_num = 0;
+    //外循环:这四个bank function
+    for(uint64_t current_fn_mask: bank_functions_to_check){
+        verbose_printerr("[ ATTENTION ] - Checking bank function is:0x%0lx \t\t bits: %s \t<<================NEW!!!\n", current_fn_mask, bit_string(current_fn_mask));
+        verbose_printerr("================================================\n");
+
+        uint64_t mask_num;
+
+        //内循环:对每个集合进行测试
+        for (size_t idx = 0; idx<sets.size(); idx++) {
+            set_t curr_set = sets[idx];      
+            //对每个地址的掩码计算后对应的bank地址进行统计      
+            for (size_t i = 0; i < curr_set.size(); i++) {
+                mask_num = num_transfer(curr_set[i].p_addr & current_fn_mask, function_num)
+                if(mask_num == 0)
+                {
+                    mask_result_statistic[0].num++;
+                }
+                else if(mask_num ==1)
+                {
+                    mask_result_statistic[1].num++;
+                }
+                else if(mask_num ==2)
+                {
+                    mask_result_statistic[2].num++;
+                }
+                else if(mask_num ==3)
+                {
+                    mask_result_statistic[3].num++;
+                }
+                else if(mask_num == 4)
+                {
+                    verbose_printerr("\tsomething wrong\n");
+
+                }
+            }
+            //输出本集合的统计数据
+            verbose_printerr("\t[ ATTENTION ] - Checking SET is:0x%zu \t\t SET.SIZE is:%zu \n", idx, i);
+            verbose_printerr("\t[ RESULT-00 ] - :0x%0lx \n", mask_result_statistic[0].num);
+            verbose_printerr("\t[ RESULT-01 ] - :0x%0lx \n", mask_result_statistic[1].num);
+            verbose_printerr("\t[ RESULT-10 ] - :0x%0lx \n", mask_result_statistic[2].num);
+            verbose_printerr("\t[ RESULT-11 ] - :0x%0lx \n", mask_result_statistic[3].num);
+            verbose_printerr("------------------------------------------------\n");
+
+            mask_result_statistic[0].num = 0;                       
+            mask_result_statistic[1].num = 0;
+            mask_result_statistic[2].num = 0;
+            mask_result_statistic[3].num = 0;
+
+        }
+        function_num++;
+        //输出本bank_function的统计数据,加一个判断bank_function正确与否的值!
+    }
+}
 
 //----------------------------------------------------------
 void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, char* o_file, uint64_t flags) {    
@@ -416,7 +541,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
             }
             
             if (time > threshold) {
-                verbose_printerr("[LOG] - [%ld] Set: %03ld -\t %lx - %lx\t Time: %ld\n", used_addr.size(), idx, tp.p_addr, tmp.p_addr, time);
+                //verbose_printerr("[LOG] - [%ld] Set: %03ld -\t %lx - %lx\t Time: %ld\n", used_addr.size(), idx, tp.p_addr, tmp.p_addr, time);
                 sets[idx].push_back(tp);
                 found_set = true;
                 break;
@@ -425,7 +550,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
         if (!found_set) {
             sets.push_back({tp});
-            verbose_printerr( "[LOG] - Set: %03ld -\t %p                                    <== NEW!!\n", sets.size(), tp.v_addr);
+            //verbose_printerr( "[LOG] - Set: %03ld -\t %p                                    <== NEW!!\n", sets.size(), tp.v_addr);
         }
     }
 
@@ -440,9 +565,9 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     if (flags & F_VERBOSE) {
         print_sets(sets);
     }
-
-    fn_masks = find_functions(sets, 6, 30, flags);
-    uint64_t row_mask = find_row_mask(sets, fn_masks, mem, threshold, flags);
+std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_fn_bits, size_t msb, uint64_t flags) 
+    //fn_masks = find_functions(sets, 2, 30, flags);
+    //uint64_t row_mask = find_row_mask(sets, fn_masks, mem, threshold, flags);
 
     free_buffer(&mem);
 }
@@ -464,7 +589,7 @@ bool is_in(char* val, std::vector<char*> arr) {
 
 //----------------------------------------------------------
 //如果 found_sets 超过预期数量 set_cnt，报错并退出程序
-bool fou    nd_enough(std::vector<set_t> sets, uint64_t set_cnt, size_t set_size) {
+bool found_enough(std::vector<set_t> sets, uint64_t set_cnt, size_t set_size) {
 
     size_t found_sets = 0;
     
