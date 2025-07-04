@@ -444,31 +444,30 @@ std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_f
             set_t curr_set = sets[idx];      
             //对每个地址的掩码计算后对应的bank地址进行统计      
             for (size_t i = 0; i < curr_set.size(); i++) {
-                mask_num = num_transfer(curr_set[i].p_addr & current_fn_mask, function_num)
+                mask_num = num_transfer(curr_set[i].p_addr & current_fn_mask, function_num);
                 if(mask_num == 0)
                 {
                     mask_result_statistic[0].num++;
                 }
-                else if(mask_num ==1)
+                else if(mask_num == 1)
                 {
                     mask_result_statistic[1].num++;
                 }
-                else if(mask_num ==2)
+                else if(mask_num == 2)
                 {
                     mask_result_statistic[2].num++;
                 }
-                else if(mask_num ==3)
+                else if(mask_num == 3)
                 {
                     mask_result_statistic[3].num++;
                 }
                 else if(mask_num == 4)
                 {
                     verbose_printerr("\tsomething wrong\n");
-
                 }
             }
             //输出本集合的统计数据
-            verbose_printerr("\t[ ATTENTION ] - Checking SET is:0x%zu \t\t SET.SIZE is:%zu \n", idx, i);
+            verbose_printerr("\t[ ATTENTION ] - Checking SET is:0x%zu \t\t SET.SIZE is:%zu \n", idx, curr_set.size());
             verbose_printerr("\t[ RESULT-00 ] - :0x%0lx \n", mask_result_statistic[0].num);
             verbose_printerr("\t[ RESULT-01 ] - :0x%0lx \n", mask_result_statistic[1].num);
             verbose_printerr("\t[ RESULT-10 ] - :0x%0lx \n", mask_result_statistic[2].num);
