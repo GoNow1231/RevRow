@@ -416,7 +416,7 @@ uint64_t num_transfer(uint64_t binary_num,int function_num) {
 }
 //----------------------------------------------------------
 //验证Bank Function的正确性
-std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_fn_bits, size_t msb, uint64_t flags) {
+std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets) {
     std::vector<uint64_t> result_masks; //用于存储验证通过的掩码，尽管这里主要目的是输出统计
     std::vector<uint64_t> bank_functions_to_check = {
         //待检测的bank掩码
@@ -484,7 +484,7 @@ std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, size_t max_f
         function_num++;
         //输出本bank_function的统计数据,加一个判断bank_function正确与否的值!
     }
-    return 0;
+    return std::vector<long unsigned int>(); // 返回一个空的 long unsigned int 向量
 }
 
 //----------------------------------------------------------
@@ -566,7 +566,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     if (flags & F_VERBOSE) {
         print_sets(sets);
     }
-    Check_bank_functions(std::vector<set_t> sets, size_t max_fn_bits, size_t msb, uint64_t flags) 
+    Check_bank_functions(sets) 
     //fn_masks = find_functions(sets, 2, 30, flags);
     //uint64_t row_mask = find_row_mask(sets, fn_masks, mem, threshold, flags);
 
