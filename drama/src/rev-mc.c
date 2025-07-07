@@ -645,7 +645,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     valid_sets_fliter(sets,flags);
     
     Check_bank_functions(sets,flags);
-    //fn_masks = find_functions(sets, 2, 30, flags);
+    fn_masks = find_functions(sets, 2, 30, flags);
     //uint64_t row_mask = find_row_mask(sets, fn_masks, mem, threshold, flags);
 
     free_buffer(&mem);
