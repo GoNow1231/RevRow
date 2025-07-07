@@ -210,7 +210,7 @@ std::vector<uint64_t> find_functions(std::vector<set_t> sets, size_t max_fn_bits
     // 外层循环，按函数复杂性（涉及的比特位数）进行迭代
     // bits会从1增加到max_fn_bits（此程序中为6）
     // 这意味着它会先找所有1-bit的函数，再找2-bit的，以此类推
-    for (size_t bits = 1L; bits <= max_fn_bits; bits++) {
+    for (size_t bits = 2L; bits <= max_fn_bits; bits++) {
         
         //生成一个初始掩码，它有 `bits` 个1。例如，bits=3时，fn_mask = 0b111
         uint64_t fn_mask = ((1L<<(bits))-1);
@@ -222,6 +222,9 @@ std::vector<uint64_t> find_functions(std::vector<set_t> sets, size_t max_fn_bits
         //输出当前正在计算的掩码设计多少个位
         verbose_printerr("[ LOG ] - #Bits: %ld \n", bits);
 
+        int num_0 = 0;
+        int num_1 = 0;
+
         //内层循环，遍历所有可能的`bits`个1的组合
         //它会从当前的fn_mask开始，一直到last_mask为止
         while (fn_mask != last_mask) {
@@ -231,40 +234,36 @@ std::vector<uint64_t> find_functions(std::vector<set_t> sets, size_t max_fn_bits
                 verbose_printerr("[ ATTENTION ] - #fn_mask: 0x%0lx \t\t bits: %s [cache line have data]: ERROR!!!\n", fn_mask, bit_string(fn_mask));
                 continue;
             }
+            
+            verbose_printerr("[ ATTENTION ] - #fn_mask: 0x%0lx \t\t bits: %s is checking!!!\n", fn_mask, bit_string(fn_mask));
 
             //遍历每一个地址集合（即每一个推测出的DRAM Bank）
             for (size_t idx = 0; idx<sets.size(); idx++) {
                 set_t curr_set = sets[idx];
                 size_t inner_cnt = 0;
+
+                num_0 = 0;
+                num_1 = 0;
+                
                 //set内循环,将所有地址与该集合的第一个地址进行比较
-                for (size_t i = 1; i < curr_set.size(); i++) {
-                    uint64_t res_base = __builtin_parityl(curr_set[0].p_addr & fn_mask);
-                    uint64_t res_probe = __builtin_parityl(curr_set[i].p_addr & fn_mask);
-                    if (res_base != res_probe) {
-                        verbose_printerr("[ ATTENTION ] - #fn_mask: 0x%0lx \t\t bits: %s [NOTMATCH]: ERROR!!!\n", fn_mask, bit_string(fn_mask));
-                        goto next_mask;
+                for (size_t i = 0; i < curr_set.size(); i++) {
+                    if(__builtin_parityl(curr_set[i].p_addr & fn_mask))
+                    {
+                        num_1++;
+                    }
+                    else
+                    {
+                        num_0++;
                     }
                 }
+                verbose_printerr("\t[ SETS-%zu ] \n", idx);
+                verbose_printerr("\t[ NUM_0-%d ] \n", num_0);
+                verbose_printerr("\t[ NUM_1-%d ] \n", num_1);
             }
-        
-            verbose_printerr("\t [ CONGRATULATIONS ]Candidate Function: 0x%0lx \t\t bits: %s\n", fn_mask, bit_string(fn_mask));
-            masks.push_back(fn_mask);    
-                 
-            next_mask:
             fn_mask = next_bit_permutation(fn_mask);
         }
     }
 
-    verbose_printerr("~~~~~~~~~~ Found Functions ~~~~~~~~~~\n");
-    masks = reduce_masks(masks);
-    if (flags & F_VERBOSE) {
-	    for (auto m: masks) {
-        	fprintf(stderr, "\t Valid Function: 0x%0lx \t\t bits: %s\n", m, bit_string(m));
-    	}    
-    }
-    for (auto m: masks) {
-	    fprintf(stdout, "Bank_mask: 0x%0lx \t\t bits: %s\n", m, bit_string(m));
-    }
     return masks;
 
 }
@@ -370,51 +369,51 @@ uint64_t find_row_mask(std  ::vector<set_t>& sets, std::vector<uint64_t> fn_mask
 }
 
 //负责将掩码结果转换为0,1,2,3等提纯的数据
-uint64_t num_transfer(uint64_t binary_num,int function_num) {
-    uint64_t result = 0;
-    if(function_num == 0){
-        if(binary_num&(1ULL<<6)){
-            result += 1;
-        }
-        if (binary_num&(1ULL<<13))
-        {       
-            result += 2;
-        }
-        return result;
-    }
-    else if (function_num == 1){
-        if(binary_num&(1ULL<<14)){
-            result += 1;
-        }
-        if (binary_num&(1ULL<<17))
-        {       
-            result += 2;
-        }
-        return result;
-    }
-    else if (function_num == 2){
-        if(binary_num&(1ULL<<15)){
-            result += 1;
-        }
-        if (binary_num&(1ULL<<18))
-        {       
-            result += 2;
-        }
-        return result;
-    }
-    else if (function_num == 3){
-        if(binary_num&(1ULL<<16)){
-            result += 1;
-        }
-        if (binary_num&(1ULL<<19))
-        {       
-            result += 2;
-        }
-        return result;
-    }
-    result = 4;
-    return result;
-}
+// uint64_t num_transfer(uint64_t binary_num,int function_num) {
+//     uint64_t result = 0;
+//     if(function_num == 0){
+//         if(binary_num&(1ULL<<6)){
+//             result += 1;
+//         }
+//         if (binary_num&(1ULL<<13))
+//         {       
+//             result += 2;
+//         }
+//         return result;
+//     }
+//     else if (function_num == 1){
+//         if(binary_num&(1ULL<<14)){
+//             result += 1;
+//         }
+//         if (binary_num&(1ULL<<17))
+//         {       
+//             result += 2;
+//         }
+//         return result;
+//     }
+//     else if (function_num == 2){
+//         if(binary_num&(1ULL<<15)){
+//             result += 1;
+//         }
+//         if (binary_num&(1ULL<<18))
+//         {       
+//             result += 2;
+//         }
+//         return result;
+//     }
+//     else if (function_num == 3){
+//         if(binary_num&(1ULL<<16)){
+//             result += 1;
+//         }
+//         if (binary_num&(1ULL<<19))
+//         {       
+//             result += 2;
+//         }
+//         return result;
+//     }
+//     result = 4;
+//     return result;
+// }
 //----------------------------------------------------------
 //验证Bank Function的正确性
 std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, uint64_t flags) {
@@ -426,60 +425,36 @@ std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, uint64_t fla
         Bank2_addr,
         Bank3_addr
     };
-    type_t mask_result_statistic= {
-        {0, 0}, // 第一个mask_type: type=0, num=0
-        {1, 0}, // 第二个mask_type: type=1, num=0
-        {2, 0}, // 第三个mask_type: type=2, num=0
-        {3, 0}  // 第四个mask_type: type=3, num=0
-    };
     
     int function_num = 0;
-    //外循环:这四个bank function
+    //外循环:两个bank function
     for(uint64_t current_fn_mask: bank_functions_to_check){
         verbose_printerr("[ ATTENTION ] - Checking bank function is:0x%0lx \t\t bits: %s \t<<================NEW!!!\n", current_fn_mask, bit_string(current_fn_mask));
         verbose_printerr("================================================\n");
 
-        uint64_t mask_num;
-
+        int num_0 = 0;
+        int num_1 = 0;
         //内循环:对每个集合进行测试
         for (size_t idx = 0; idx<sets.size(); idx++) {
             set_t curr_set = sets[idx];      
+            num_0 = 0;
+            num_1 = 0;
             //对每个地址的掩码计算后对应的bank地址进行统计      
             for (size_t i = 0; i < curr_set.size(); i++) {
-                mask_num = num_transfer(curr_set[i].p_addr & current_fn_mask, function_num);
-                if(mask_num == 0)
-                {
-                    mask_result_statistic[0].num++;
+                if(__builtin_parityl(curr_set[i].p_addr & current_fn_mask))
+                {//bank地址是1
+                    num_1++;
                 }
-                else if(mask_num == 1)
-                {
-                    mask_result_statistic[1].num++;
-                }
-                else if(mask_num == 2)
-                {
-                    mask_result_statistic[2].num++;
-                }
-                else if(mask_num == 3)
-                {
-                    mask_result_statistic[3].num++;
-                }
-                else if(mask_num == 4)
-                {
-                    verbose_printerr("\tsomething wrong\n");
-                }
+                else
+                {//bank地址是0
+                    num_0++;
+                }                  
             }
             //输出本集合的统计数据
             verbose_printerr("\t[ ATTENTION ] - Checking SET is:0x%zu \t\t SET.SIZE is:%zu \n", idx, curr_set.size());
-            verbose_printerr("\t[ RESULT-00 ] - :0x%0lx \n", mask_result_statistic[0].num);
-            verbose_printerr("\t[ RESULT-01 ] - :0x%0lx \n", mask_result_statistic[1].num);
-            verbose_printerr("\t[ RESULT-10 ] - :0x%0lx \n", mask_result_statistic[2].num);
-            verbose_printerr("\t[ RESULT-11 ] - :0x%0lx \n", mask_result_statistic[3].num);
+            verbose_printerr("\t[ RESULT-0 ] - :0x%0lx \n", num_0);
+            verbose_printerr("\t[ RESULT-1 ] - :0x%0lx \n", num_1);
             verbose_printerr("------------------------------------------------\n");
-
-            mask_result_statistic[0].num = 0;                       
-            mask_result_statistic[1].num = 0;
-            mask_result_statistic[2].num = 0;
-            mask_result_statistic[3].num = 0;
 
         }
         function_num++;
