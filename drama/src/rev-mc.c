@@ -543,16 +543,19 @@ void valid_sets_fliter(std::vector<set_t>& sets, uint64_t flags){
             verbose_printerr("bank function(0x%0lx) on sets(%zu) is:%d\n", current_fn_mask, idx, valid_num);
 
             //对set进行筛选     
-            //迭代器越界了
-            for(auto s = curr_set.begin(); s < curr_set.end(); s++)
+            for(auto s = curr_set.begin(); s != curr_set.end();)
             {
-                if((__builtin_parityl(s.p_addr & current_fn_mask)) != valid_num)
+                if((__builtin_parityl(s->p_addr & current_fn_mask)) != valid_num)
                 {
                     //不符合的地址直接删除掉
-                    curr_set.erase(s);
-                    s -= 1;
+                    s = curr_set.erase(s);
                     error_add_num++;
                 }     
+                else
+                {
+                    s++;
+                }
+                
             }
 
             verbose_printerr("\terror number is:%d\n", error_add_num);
