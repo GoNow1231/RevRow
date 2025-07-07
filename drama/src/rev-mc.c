@@ -29,8 +29,9 @@
 #define BITSET_SIZE 256  // bitset used to exploit bitwise operations 
 #define ROW_SET_CNT 5
 
-#define Bank0_addr ((1ULL << 6) ^ (1ULL << 13))  // 0x2040 (a_6 ^ a_13)
-#define Bank1_addr ((1ULL << 14) ^ (1ULL << 17)) // 0x24000 (a_14 ^ a_17)
+//禁用两个错误的bank function
+//#define Bank0_addr ((1ULL << 6) ^ (1ULL << 13))  // 0x2040 (a_6 ^ a_13)
+//#define Bank1_addr ((1ULL << 14) ^ (1ULL << 17)) // 0x24000 (a_14 ^ a_17)
 #define Bank2_addr ((1ULL << 15) ^ (1ULL << 18)) // 0x48000 (a_15 ^ a_18)
 #define Bank3_addr ((1ULL << 16) ^ (1ULL << 19)) // 0x90000 (a_16 ^ a_19)
 
@@ -420,8 +421,8 @@ std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, uint64_t fla
     std::vector<uint64_t> result_masks; //用于存储验证通过的掩码，尽管这里主要目的是输出统计
     std::vector<uint64_t> bank_functions_to_check = {
         //待检测的bank掩码
-        Bank0_addr,
-        Bank1_addr,
+        //Bank0_addr,
+        //Bank1_addr,
         Bank2_addr,
         Bank3_addr
     };
@@ -487,6 +488,73 @@ std::vector<uint64_t> Check_bank_functions(std::vector<set_t> sets, uint64_t fla
     return std::vector<long unsigned int>(); // 返回一个空的 long unsigned int 向量
 }
 
+//----------------------------------------------------------
+//根据正确的Bank function，进一步地筛选出正确的bank地址集合
+void valid_sets_fliter(std::vector<set_t>& sets, uint64_t flags){
+    
+    std::vector<uint64_t> bank_functions = {
+        //正确的bank掩码
+        //Bank0_addr,
+        //Bank1_addr,
+        Bank2_addr,
+        Bank3_addr
+    };
+
+    int num_0 = 0;
+    int num_1 = 0;
+    int valid_num = 0;
+    int error_add_num = 0;
+    //外循环：对两个正确的掩码进行计算
+    for(uint64_t current_fn_mask: bank_functions){
+        verbose_printerr("[ ATTENTION ] - Valid bank function is:0x%0lx \t\t bits: %s \t<<================NEW!!!\n", current_fn_mask, bit_string(current_fn_mask));
+        verbose_printerr("================================================\n");
+        
+        //内循环:对每个集合进行测试
+        for (size_t idx = 0; idx<sets.size(); idx++) {
+            
+            //初始化
+            num_0 = 0;
+            num_1 = 0;
+            valid_num = 0;
+            error_add_num = 0;
+            set_t curr_set = sets[idx];      
+            
+            //对每个地址的掩码计算后对应的bank地址进行统计      
+            for (size_t i = 0; i < curr_set.size(); i++) {
+                if(__builtin_parityl(curr_set[i].p_addr & current_fn_mask))
+                {//bank地址是1
+                    num_1++;
+                }
+                else
+                {//bank地址是0
+                    num_0++;
+                }              
+            }
+            //判断正确的bankaddress应该是什么
+            if(num_0 > num_1)
+            {
+                valid_num = 0;
+            }
+            else
+            {
+                valid_num = 1;
+            }
+
+            verbose_printerr("bank function(0x%0lx) on sets(%zu) is:%d\n", current_fn_mask, idx, valid_num);
+
+            //对set进行筛选     
+            for(size_t i = 0; i < curr_set.size(); i++) {
+                if((__builtin_parityl(curr_set[i].p_addr & current_fn_mask)) != valid_num)
+                {
+                    //不符合的地址直接删除掉
+                    sets[idx].erase(sets[idx].begin() + i);
+                    error_add_num++;
+                }                        
+            }
+            verbose_printerr("\terror number is:%d\n", error_add_num);
+        }
+    }
+}
 //----------------------------------------------------------
 void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, char* o_file, uint64_t flags) {    
 
@@ -566,6 +634,9 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     if (flags & F_VERBOSE) {
         print_sets(sets);
     }
+    
+    valid_sets_fliter(sets,flags)
+    
     Check_bank_functions(sets,flags);
     //fn_masks = find_functions(sets, 2, 30, flags);
     //uint64_t row_mask = find_row_mask(sets, fn_masks, mem, threshold, flags);
