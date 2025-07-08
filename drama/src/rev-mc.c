@@ -260,22 +260,16 @@ std::vector<uint64_t> find_functions(std::vector<set_t> sets, size_t max_fn_bits
                 
                 if (num_0 < 5)
                 {
-                    verbose_printerr("\t\t[ NUM_0-%d ] <====MARK!!!\n", num_0);
+                    verbose_printerr("\t\t[ NUM_0-%d ] <============================MARK!!!\n", num_0);
+                }
+                else if (num_1 < 5)
+                {
+                    verbose_printerr("\t\t[ NUM_1-%d ] <============================MARK!!!\n", num_1);
                 }
                 else
                 {
-                    verbose_printerr("\t\t[ NUM_0-%d ] \n", num_0);
+                    verbose_printerr("\t\t[ NUM_0-%d ]--[ NUM_1-%d ] \n", num_0, num_1);
                 }
-                if (num_1 < 5)
-                {
-                    verbose_printerr("\t\t[ NUM_1-%d ] <====MARK!!!\n", num_1);
-                }
-                else
-                {
-                    verbose_printerr("\t\t[ NUM_1-%d ] \n", num_1);
-                }
-                
-
             }
             fn_mask = next_bit_permutation(fn_mask);
         }
