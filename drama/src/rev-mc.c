@@ -257,8 +257,25 @@ std::vector<uint64_t> find_functions(std::vector<set_t> sets, size_t max_fn_bits
                     }
                 }
                 verbose_printerr("\t[ SETS-%zu ] \n", idx);
-                verbose_printerr("\t[ NUM_0-%d ] \n", num_0);
-                verbose_printerr("\t[ NUM_1-%d ] \n", num_1);
+                
+                if (num_0 < 5)
+                {
+                    verbose_printerr("\t\t[ NUM_0-%d ] <====MARK!!!\n", num_0);
+                }
+                else
+                {
+                    verbose_printerr("\t\t[ NUM_0-%d ] \n", num_0);
+                }
+                if (num_1 < 5)
+                {
+                    verbose_printerr("\t\t[ NUM_1-%d ] <====MARK!!!\n", num_1);
+                }
+                else
+                {
+                    verbose_printerr("\t\t[ NUM_1-%d ] \n", num_1);
+                }
+                
+
             }
             fn_mask = next_bit_permutation(fn_mask);
         }
@@ -295,7 +312,7 @@ It currently finds some of the interesting bits for the row addressing.
 	are from the bank selection. This is currently done manually 
 */
 //???????????
-uint64_t find_row_mask(std  ::vector<set_t>& sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, uint64_t flags) {
+uint64_t find_row_mask(std::vector<set_t>& sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, uint64_t flags) {
 
     addr_tuple base_addr = gen_addr_tuple(get_rnd_addr(mem.buffer, mem.size, 0));
     std::vector<set_t> same_row_sets;
