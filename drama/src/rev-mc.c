@@ -193,7 +193,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
     int bank_num;
 
-    while (!found_enough(sets, sets_cnt, SET_SIZE)) {
+    while (!found_enough(*sets, sets_cnt, SET_SIZE)) {
         //生成一个随机地址地址对
         char* rnd_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
         if (is_in(rnd_addr, used_addr))
@@ -210,7 +210,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
         // 确保 bank_num 在有效范围内，防止越界访问
         if ((bank_num >= 0) && (bank_num < NUM_DRAM_BANKS)) {
             // 直接将地址对添加到对应 Bank 的集合中
-            sets[bank_num].push_back(tp);
+            (*sets)[bank_num].push_back(tp);
             // 打印日志，指示地址被添加到哪个 Bank
             verbose_printerr("[LOG] - Added %p (p_addr: %lx) to Bank %d\n", tp.v_addr, tp.p_addr, bank_num);
         } else {
@@ -221,7 +221,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
     //打印
     if (flags & F_VERBOSE) {
-        print_sets(sets);
+        print_sets(*sets);
     }
 
     free_buffer(&mem);
