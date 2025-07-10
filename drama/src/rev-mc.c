@@ -44,8 +44,8 @@ typedef std::vector<addr_tuple> set_t; //定义一个存放addr_tuple地址对�
 //-------------------------------------------
 //3个Helper函数
 bool is_in(char* val, std::vector<char*> arr);
-bool found_enough(std::vector<set_t> sets, uint64_t set_cnt, size_t set_size);
-void print_sets(std::vector<set_t> sets);
+bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_size);
+void print_sets(std::vector<set_t>* sets_array);
 
 //-------------------------------------------
 //返回两个地址访问之间的延迟(CPU时钟周期)，若a1和a2位于同一BANK或row，时间会变长
@@ -193,7 +193,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
     int bank_num;
 
-    while (!found_enough(*sets, sets_cnt, SET_SIZE)) {
+    while (!found_enough(sets, sets_cnt, SET_SIZE)) {
         //生成一个随机地址地址对
         char* rnd_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
         if (is_in(rnd_addr, used_addr))
@@ -210,7 +210,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
         // 确保 bank_num 在有效范围内，防止越界访问
         if ((bank_num >= 0) && (bank_num < NUM_DRAM_BANKS)) {
             // 直接将地址对添加到对应 Bank 的集合中
-            (*sets)[bank_num].push_back(tp);
+            sets[bank_num].push_back(tp);
             // 打印日志，指示地址被添加到哪个 Bank
             verbose_printerr("[LOG] - Added %p (p_addr: %lx) to Bank %d\n", tp.v_addr, tp.p_addr, bank_num);
         } else {
@@ -221,7 +221,7 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
     //打印
     if (flags & F_VERBOSE) {
-        print_sets(*sets);
+        print_sets(sets);
     }
 
     free_buffer(&mem);
@@ -244,13 +244,13 @@ bool is_in(char* val, std::vector<char*> arr) {
 
 //----------------------------------------------------------
 //如果 found_sets 超过预期数量 set_cnt，报错并退出程序,set_size自定义，为每个bank想要的地址数目
-bool found_enough(std::vector<set_t> sets, uint64_t set_cnt, size_t set_size) {
+bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_size) {
 
     size_t found_sets = 0;
     
     //遍历查看所有的set,统计set的大小比set_size大的set数字
-    for (int i =0; i < sets.size(); i++) {
-        set_t curr_set = sets[i];
+    for (int i = 0; i < NUM_DRAM_BANKS; i++) {
+        set_t& curr_set = sets_array[i];
         if (curr_set.size() >= set_size) {
             found_sets += 1;
         }
@@ -265,18 +265,11 @@ bool found_enough(std::vector<set_t> sets, uint64_t set_cnt, size_t set_size) {
 }
 
 //用于输出不同集合的地址对
-void print_sets(std::vector<set_t> sets) {
-//sets.size获取set的数目
-//sets[idx].size获取第idx个set的大小
-//输出示例:
-// [LOG] - Set: 0    Size: 2
-//     v_addr:0x1000 - p_addr:0x2000
-//     v_addr:0x1008 - p_addr:0x2008
-// [LOG] - Set: 1    Size: 1
-//     v_addr:0x1010 - p_addr:0x2010
-    for (int idx = 0; idx < sets.size(); idx++) {
-        fprintf(stderr, "[LOG] - BANK: %d\tSize: %ld\n", idx, sets[idx].size());    
-        for (auto tmp: sets[idx]) {
+void print_sets(std::vector<set_t>* sets_array) {
+
+    for (int idx = 0; idx < NUM_DRAM_BANKS; idx++) {
+        fprintf(stderr, "[LOG] - BANK: %d\tSize: %ld\n", idx, sets_array[idx].size());    
+        for (auto tmp: sets_array[idx]) {
             fprintf(stderr, "\tv_addr:%p - p_addr:%p\n", tmp.v_addr, (void*) tmp.p_addr);
         }
     }    

@@ -5,7 +5,7 @@
 该工具可用于对测试系统的 DRAM 映射函数 进行逆向工程分析。
 它主要执行两个任务：
 
-- 恢复 BANK 冲突函数（bank conflict functions）
+- 恢复 Row 冲突函数（bank conflict functions）
 
 该工具的实现方式较为“hackish”，因为它在设计上对地址位的用途做出了一些较强的假设。
 例如，它假设用于选择 row（行） 的物理地址位位于地址的高位。

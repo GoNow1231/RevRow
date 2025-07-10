@@ -7,11 +7,6 @@ typedef struct {
 	uint64_t 	p_addr;
 } addr_tuple;
 
-typedef struct 
-{
-    uint64_t type; // 类型标识符
-    uint64_t num;  // 数量或计数
-} mask_type;
 
 //----------------------------------------------------------
 // 			Functions

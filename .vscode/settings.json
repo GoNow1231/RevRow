@@ -12,6 +12,9 @@
         "utils.h": "c",
         "random": "c",
         "bitset": "c",
-        "rev-mc.h": "c"
+        "rev-mc.h": "c",
+        "types.h": "c",
+        "sched.h": "c",
+        "stdlib.h": "c"
     }
 }

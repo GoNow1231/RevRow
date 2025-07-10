@@ -5,7 +5,7 @@
 This tool can be used to reverse engineer the DRAM mapping functions of the test system.
 It carries out two main tasks: 
 
-- Recovering the bank conflicts functions 
+- Recovering the Row conflicts functions 
 
 The tool is a bit hackish since it makes some strong assumptions on the bits used for different purposes. 
 For instance it assumes that the bits from the physical address used to select the row are among the high bits. 
