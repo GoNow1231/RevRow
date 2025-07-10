@@ -44,8 +44,10 @@ typedef std::vector<addr_tuple> set_t; //定义一个存放addr_tuple地址对�
 //-------------------------------------------
 //3个Helper函数
 bool is_in(char* val, std::vector<char*> arr);
-bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_size);
-void print_sets(std::vector<set_t>* sets_array);
+bool found_enough(set_t* sets_array, uint64_t set_cnt, size_t set_size);
+void print_sets(set_t* sets_array);
+// bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_size);
+// void print_sets(std::vector<set_t>* sets_array);
 
 //-------------------------------------------
 //返回两个地址访问之间的延迟(CPU时钟周期)，若a1和a2位于同一BANK或row，时间会变长
@@ -165,7 +167,8 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     int o_fd = 0;//输出文件
     int huge_fd = 0;
 
-    std::vector<set_t> sets[NUM_DRAM_BANKS];//set的集合
+    // std::vector<set_t> sets[NUM_DRAM_BANKS];//set的集合
+    set_t sets[NUM_DRAM_BANKS];//set的集合
     std::vector<char*> used_addr;//记录已经使用过的地址,放置重复采样
 
     //time获得一个long int(UNIX时间戳);
@@ -244,7 +247,7 @@ bool is_in(char* val, std::vector<char*> arr) {
 
 //----------------------------------------------------------
 //如果 found_sets 超过预期数量 set_cnt，报错并退出程序,set_size自定义，为每个bank想要的地址数目
-bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_size) {
+bool found_enough(set_t* sets_array, uint64_t set_cnt, size_t set_size) {
 
     size_t found_sets = 0;
     
@@ -265,7 +268,7 @@ bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_s
 }
 
 //用于输出不同集合的地址对
-void print_sets(std::vector<set_t>* sets_array) {
+void print_sets(set_t* sets_array) {
 
     for (int idx = 0; idx < NUM_DRAM_BANKS; idx++) {
         fprintf(stderr, "[LOG] - BANK: %d\tSize: %ld\n", idx, sets_array[idx].size());    

@@ -10,4 +10,4 @@ Additional information about RevMC can be found here: https://www.usenix.org/con
 
 Inside the `drama` folder you can find a tool that helps you reverse engineer the DRAM memory mappings used by the memory controller. 
 
-The current version focuses on the analysis of DRAM BANK functions, supporting the examination of all possible 2-bit BANK function mappings. It allows manual inspection to determine which BANK functions are considered valid.
+The current implementation is centered on identifying and classifying physical address sets across different DRAM banks, providing a foundation for further analysis of bank conflicts.
