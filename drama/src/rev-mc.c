@@ -58,6 +58,12 @@ static uint64_t next_bit_permutation(uint64_t v) {
         return (t + 1) | (((~t & -~t) - 1) >> (__builtin_ctzl(v) + 1));
 }
 
+// 用于存储众数超过阈值时的信息
+struct HighModeEntry {
+    uint64_t mask;
+    size_t set_idx;
+};
+
 
 //-------------------------------------------
 //2个Helper函数
@@ -167,82 +173,6 @@ int which_bank(uint64_t p_addr){
     return bank_num;
 }
 
-//----------------------------------------------------------
-// find_row_function 函数实现
-void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, size_t rounds, uint64_t flags) {
-
-    verbose_printerr("~~~~~~~~~~ Starting Row Mask Iteration and Validation Output ~~~~~~~~~~\n");
-
-    uint64_t row_mask = LS_BITMASK(16); 
-    uint64_t last_mask = (row_mask<<(40-16)); 
-    row_mask <<= CL_SHIFT; 
-
-    while (row_mask != 0 && (row_mask & LS_BITMASK(CL_SHIFT))) {
-        row_mask = next_bit_permutation(row_mask);
-    }
-    if (row_mask == 0) {
-        verbose_printerr("[ERROR] - Initial row mask generation failed or no valid starting mask after CL_SHIFT adjustment.\n");
-        return;
-    }
-
-
-    while (row_mask < last_mask) {
-        verbose_printerr("[TESTING MASK] 0x%0lx \t\t bits: %s\n", row_mask, bit_string(row_mask));
-
-        for (size_t set_idx = 0; set_idx < row_sets.size(); ++set_idx) {
-            const auto& addr_pool = row_sets[set_idx]; 
-
-            if (addr_pool.empty()) {
-                verbose_printerr("  [WARN] - Row Set %zu is empty. Skipping.\n", set_idx);
-                continue;
-            }
-
-            // 统计众数
-            std::map<uint64_t, int> masked_value_counts;
-            uint64_t current_mode_value = 0;
-            int max_count = 0;
-
-            for (const auto& addr_entry : addr_pool) {
-                uint64_t masked_val = addr_entry.p_addr & row_mask;
-                masked_value_counts[masked_val]++;
-            }
-
-            // 找到众数
-            for (const auto& pair : masked_value_counts) {
-                if (pair.second > max_count) {
-                    max_count = pair.second;
-                    current_mode_value = pair.first;
-                }
-            }
-
-            const addr_tuple& base_addr = addr_pool[0]; 
-            verbose_printerr("  [Row Set %zu] Base PAddr: 0x%0lx\n", set_idx, base_addr.p_addr);
-            verbose_printerr("    Masked Base (0x%0lx & 0x%0lx): 0x%0lx\n", base_addr.p_addr, row_mask, (base_addr.p_addr & row_mask));
-            
-            verbose_printerr("    Other Addrs Masked:\n");
-            for (size_t i = 1; i < addr_pool.size(); ++i) { 
-                const addr_tuple& tmp = addr_pool[i];
-                verbose_printerr("      - PAddr: 0x%0lx masked to 0x%0lx\n", tmp.p_addr, (tmp.p_addr & row_mask));
-            }
-            
-            // 输出众数及比例
-            verbose_printerr("    [Mode Analysis]\n");
-            verbose_printerr("      Mode Masked Value: 0x%0lx\n", current_mode_value);
-            verbose_printerr("      Count: %d/%d\n", max_count, (int)SET_SIZE); // 使用 SET_SIZE (50) 作为分母
-        }
-        verbose_printerr("\n"); 
-
-        row_mask = next_bit_permutation(row_mask);
-        while (row_mask != 0 && (row_mask & LS_BITMASK(CL_SHIFT))) {
-            row_mask = next_bit_permutation(row_mask);
-        }
-        if (row_mask == 0 && (last_mask != 0 || LS_BITMASK(16) != 0)) { 
-             verbose_printerr("[LOG] - All relevant row mask permutations exhausted.\n");
-             break; 
-        }
-    }
-    verbose_printerr("~~~~~~~~~~ Row Mask Iteration and Validation Output Complete ~~~~~~~~~~\n");
-}
 
 //----------------------------------------------------------
 void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, char* o_file, uint64_t flags) {    
@@ -333,7 +263,6 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
                 if (latency < threshold) {
                     row_sets[current_row_idx].push_back(probe_addr_tuple);
-                    // 移除此处的详细输出
                 }
             }
         }
@@ -395,3 +324,99 @@ void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, uint64_t
     }    
 }
 
+//----------------------------------------------------------
+// find_row_function 函数实现
+void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, size_t rounds, uint64_t flags) {
+
+    verbose_printerr("~~~~~~~~~~ Starting Row Mask Iteration and Validation Output ~~~~~~~~~~\n");
+
+    uint64_t row_mask = LS_BITMASK(16); 
+    uint64_t last_mask = (row_mask<<(40-16)); 
+    row_mask <<= CL_SHIFT; 
+
+    // 存储符合众数 > 10 条件的掩码和集合索引
+    std::vector<HighModeEntry> high_mode_results;
+
+    while (row_mask != 0 && (row_mask & LS_BITMASK(CL_SHIFT))) {
+        row_mask = next_bit_permutation(row_mask);
+    }
+    if (row_mask == 0) {
+        verbose_printerr("[ERROR] - Initial row mask generation failed or no valid starting mask after CL_SHIFT adjustment.\n");
+        return;
+    }
+
+
+    while (row_mask < last_mask) {
+        verbose_printerr("---当前掩码是 0x%0lx (bits: %s)=====================<<<<<<<\n", row_mask, bit_string(row_mask));
+
+        for (size_t set_idx = 0; set_idx < row_sets.size(); ++set_idx) {
+            const auto& addr_pool = row_sets[set_idx]; 
+
+            if (addr_pool.empty()) {
+                verbose_printerr("  [WARN] - Row Set %zu is empty. Skipping.\n", set_idx);
+                continue;
+            }
+
+            std::map<uint64_t, int> masked_value_counts;
+            uint64_t current_mode_value = 0;
+            int max_count = 0;
+
+            for (const auto& addr_entry : addr_pool) {
+                uint64_t masked_val = addr_entry.p_addr & row_mask;
+                masked_value_counts[masked_val]++;
+            }
+
+            for (const auto& pair : masked_value_counts) {
+                if (pair.second > max_count) {
+                    max_count = pair.second;
+                    current_mode_value = pair.first;
+                }
+            }
+
+            // 输出简化的统计结果
+            verbose_printerr("  在第 %zu 集合上的统计结果:\n", set_idx);
+            verbose_printerr("    Mode Masked Value: 0x%0lx\n", current_mode_value);
+            verbose_printerr("    Count: %d/%d\n", max_count, (int)SET_SIZE);
+            
+            // 如果众数 > 10，则记录该掩码和集合索引
+            if (max_count > 10) {
+                high_mode_results.push_back({.mask = row_mask, .set_idx = set_idx});
+            }
+        }
+        verbose_printerr("\n"); 
+
+        row_mask = next_bit_permutation(row_mask);
+        while (row_mask != 0 && (row_mask & LS_BITMASK(CL_SHIFT))) {
+            row_mask = next_bit_permutation(row_mask);
+        }
+        if (row_mask == 0 && (last_mask != 0 || LS_BITMASK(16) != 0)) { 
+             verbose_printerr("[LOG] - All relevant row mask permutations exhausted.\n");
+             break; 
+        }
+    }
+    
+    // 最后输出众数 > 10 的详细信息
+    verbose_printerr("\n~~~~~~~~~~ Detailed Results for Masks with Mode Count > 10 ~~~~~~~~~~\n");
+    if (high_mode_results.empty()) {
+        verbose_printerr("No masks found with mode count > 10 in any set.\n");
+    } else {
+        for (const auto& entry : high_mode_results) {
+            const auto& target_addr_pool = row_sets[entry.set_idx];
+            
+            verbose_printerr("\nMask: 0x%0lx (bits: %s) on Row Set %zu\n",
+                             entry.mask, bit_string(entry.mask), entry.set_idx);
+            
+            if (!target_addr_pool.empty()) {
+                const addr_tuple& base_addr = target_addr_pool[0];
+                verbose_printerr("  Base PAddr: 0x%0lx masked to 0x%0lx\n", base_addr.p_addr, (base_addr.p_addr & entry.mask));
+                verbose_printerr("  All Addresses Masked (Full Set):\n");
+                for (const auto& tmp : target_addr_pool) { // 遍历包括基地址在内的所有地址
+                    verbose_printerr("    - PAddr: 0x%0lx masked to 0x%0lx\n", tmp.p_addr, (tmp.p_addr & entry.mask));
+                }
+            } else {
+                verbose_printerr("  (目标行集合为空，这不应该发生，因为已被添加到 high_mode_results。)\n");
+            }
+        }
+    }
+    verbose_printerr("~~~~~~~~~~ Detailed Results Output Complete ~~~~~~~~~~\n");
+}
