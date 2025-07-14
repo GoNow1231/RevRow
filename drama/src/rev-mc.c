@@ -14,8 +14,10 @@
 #include <functional>
 #include <algorithm>
 #include <bitset>  
+#include <cstdio> // For getchar()
+#include <map>    // For std::map to count masked values
 
-#include "rev-mc.h"
+#include "rev-mc.h" 
 
 #define BOOL_XOR(a,b) ((a) != (b))
 #define O_HEADER "base,probe,time\n"
@@ -37,12 +39,30 @@
 	do { if (flags & F_VERBOSE) { fprintf(stderr, fmt, ##__VA_ARGS__); } } while(0)
 
 
-// 移除 typedef std::vector<addr_tuple> set_t;
+//-------------------------------------------
+// 新增的 next_bit_permutation 函数实现 (从 utils.c 移入)
+/**
+ * @brief 生成具有相同设置位数的下一个更大的整数（Gosper's Hack）。
+ *
+ * 此函数实现了 Gosper's Hack 算法，用于计算给定整数 `v` 的下一个更大的整数，
+ * 且该整数拥有与 `v` 相同数量的设置（1）位。
+ * 例如，如果 `v` 是一个二进制表示中包含 K 个 1 的数，此函数将返回下一个
+ * 拥有 K 个 1 的更大的数。当所有具有 K 个 1 的组合都被遍历后，它可能会返回一个
+ * 意想不到的大数（或0，取决于实现和输入）。
+ *
+ * @param v 输入的无符号64位整数。
+ * @return 具有与 `v` 相同数量设置位但值更大的下一个整数。
+ */
+static uint64_t next_bit_permutation(uint64_t v) {
+        uint64_t t = v | (v - 1);
+        return (t + 1) | (((~t & -~t) - 1) >> (__builtin_ctzl(v) + 1));
+}
+
 
 //-------------------------------------------
-//2个Helper函数 (found_enough 已移除)
+//2个Helper函数
 bool is_in(char* val, std::vector<char*> arr);
-// 修改 print_sets 的函数声明
+// 修改 print_sets 的函数声明，匹配 find_row_function 的参数类型
 void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, uint64_t flags); 
 
 //-------------------------------------------
@@ -91,17 +111,12 @@ uint64_t get_pfn(uint64_t entry) {
 //核心代码! 输入是一个虚拟地址，获取虚拟地址对应的物理地址
 uint64_t get_phys_addr(uint64_t v_addr) 
 {
-    //条目存储,在proc/self/pagemap中每一个页都对应着一个entry条目,并且顺序的放置,每个条目大小为8B
     uint64_t entry;
-    //v_addr/4096,除以页面大小（这里是默认了4k）,得到页号（4K大小的页号）,乘上sizeof(entry)得到该条目在pagemap文件中的偏移量
-    //什么tmd代码！！！更改成hugepage这里不用改是吧？？？？
     uint64_t offset = (v_addr/4096) * sizeof(entry);
-    //物理页框号page frame number
     uint64_t pfn;  
 
     int fd = open("/proc/self/pagemap", O_RDONLY);
     assert(fd >= 0);
-    //在fd的offset处读取sizeof(entry)给entry
     int bytes_read = pread(fd, &entry, sizeof(entry), offset);
     close(fd);
     assert(bytes_read  == 8);
@@ -110,7 +125,6 @@ uint64_t get_phys_addr(uint64_t v_addr)
     pfn = get_pfn(entry);
     assert(pfn != 0);
 
-    //组合物理页框号和页内偏移
     return ((pfn*4096) | (v_addr & 4095)); 
 }
 
@@ -135,7 +149,6 @@ std::vector<uint8_t> get_dram_fn(uint64_t addr, std::vector<uint64_t> fn_masks) 
 int which_bank(uint64_t p_addr){
 
     std::vector<uint64_t> bank_functions = {
-        //正确的bank掩码
         Bank0_addr,
         Bank1_addr,
         Bank2_addr,
@@ -154,6 +167,82 @@ int which_bank(uint64_t p_addr){
     return bank_num;
 }
 
+//----------------------------------------------------------
+// find_row_function 函数实现
+void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, size_t rounds, uint64_t flags) {
+
+    verbose_printerr("~~~~~~~~~~ Starting Row Mask Iteration and Validation Output ~~~~~~~~~~\n");
+
+    uint64_t row_mask = LS_BITMASK(16); 
+    uint64_t last_mask = (row_mask<<(40-16)); 
+    row_mask <<= CL_SHIFT; 
+
+    while (row_mask != 0 && (row_mask & LS_BITMASK(CL_SHIFT))) {
+        row_mask = next_bit_permutation(row_mask);
+    }
+    if (row_mask == 0) {
+        verbose_printerr("[ERROR] - Initial row mask generation failed or no valid starting mask after CL_SHIFT adjustment.\n");
+        return;
+    }
+
+
+    while (row_mask < last_mask) {
+        verbose_printerr("[TESTING MASK] 0x%0lx \t\t bits: %s\n", row_mask, bit_string(row_mask));
+
+        for (size_t set_idx = 0; set_idx < row_sets.size(); ++set_idx) {
+            const auto& addr_pool = row_sets[set_idx]; 
+
+            if (addr_pool.empty()) {
+                verbose_printerr("  [WARN] - Row Set %zu is empty. Skipping.\n", set_idx);
+                continue;
+            }
+
+            // 统计众数
+            std::map<uint64_t, int> masked_value_counts;
+            uint64_t current_mode_value = 0;
+            int max_count = 0;
+
+            for (const auto& addr_entry : addr_pool) {
+                uint64_t masked_val = addr_entry.p_addr & row_mask;
+                masked_value_counts[masked_val]++;
+            }
+
+            // 找到众数
+            for (const auto& pair : masked_value_counts) {
+                if (pair.second > max_count) {
+                    max_count = pair.second;
+                    current_mode_value = pair.first;
+                }
+            }
+
+            const addr_tuple& base_addr = addr_pool[0]; 
+            verbose_printerr("  [Row Set %zu] Base PAddr: 0x%0lx\n", set_idx, base_addr.p_addr);
+            verbose_printerr("    Masked Base (0x%0lx & 0x%0lx): 0x%0lx\n", base_addr.p_addr, row_mask, (base_addr.p_addr & row_mask));
+            
+            verbose_printerr("    Other Addrs Masked:\n");
+            for (size_t i = 1; i < addr_pool.size(); ++i) { 
+                const addr_tuple& tmp = addr_pool[i];
+                verbose_printerr("      - PAddr: 0x%0lx masked to 0x%0lx\n", tmp.p_addr, (tmp.p_addr & row_mask));
+            }
+            
+            // 输出众数及比例
+            verbose_printerr("    [Mode Analysis]\n");
+            verbose_printerr("      Mode Masked Value: 0x%0lx\n", current_mode_value);
+            verbose_printerr("      Count: %d/%d\n", max_count, (int)SET_SIZE); // 使用 SET_SIZE (50) 作为分母
+        }
+        verbose_printerr("\n"); 
+
+        row_mask = next_bit_permutation(row_mask);
+        while (row_mask != 0 && (row_mask & LS_BITMASK(CL_SHIFT))) {
+            row_mask = next_bit_permutation(row_mask);
+        }
+        if (row_mask == 0 && (last_mask != 0 || LS_BITMASK(16) != 0)) { 
+             verbose_printerr("[LOG] - All relevant row mask permutations exhausted.\n");
+             break; 
+        }
+    }
+    verbose_printerr("~~~~~~~~~~ Row Mask Iteration and Validation Output Complete ~~~~~~~~~~\n");
+}
 
 //----------------------------------------------------------
 void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, char* o_file, uint64_t flags) {    
@@ -163,24 +252,22 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     int o_fd = 0;//输出文件
     int huge_fd = 0;
 
-    // 修改声明: 从 C 风格数组改为 std::vector
-    std::vector<std::vector<addr_tuple>> row_sets(NUM_DRAM_BANKS); // 用于存储16个Row的地址集合，初始化为16个空vector
-    std::vector<addr_tuple> active_base_rows; // 存储已找到的16个Row的基础地址 (v_addr, p_addr)
-    std::vector<uint64_t> identified_base_row_p_addrs; // 存储已找到的16个Row的基础物理地址（用于判重）
+    std::vector<std::vector<addr_tuple>> row_sets(NUM_DRAM_BANKS); 
+    std::vector<addr_tuple> active_base_rows; 
+    std::vector<uint64_t> identified_base_row_p_addrs; 
 
-    //time获得一个long int(UNIX时间戳);
-    srand((unsigned) time(&t));//根据当前时间随机生成数字,保证地址采样的随机性
+    srand((unsigned) time(&t));
 
-    if (flags & F_EXPORT) {//详细输出控制部分，写入表头
+    if (flags & F_EXPORT) {
         if (o_file == NULL) {
             fprintf(stderr, "[ERROR] - Missing export file name\n");
             exit(1);
         }
-        if((o_fd = open(o_file, O_CREAT|O_RDWR)) == -1) {//-1是出错,不然返回的是文件描述符(>=0的整数)
+        if((o_fd = open(o_file, O_CREAT|O_RDWR)) == -1) {
             perror("[ERROR] - Unable to create export file");
             exit(1);
         }
-        dprintf(o_fd, O_HEADER);//写入表头
+        dprintf(o_fd, O_HEADER);
     }
 
     mem_buff_t mem = {
@@ -189,22 +276,19 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
         .flags  = flags ,
     };
 
-    alloc_buffer(&mem);//完成内存缓冲区的占用,大小是m_size,默认是5GB,需要考量这个是否真的分配了这么多有效的地址
+    alloc_buffer(&mem);
 
-    int current_row_idx = 0; // 当前正在填充的Row集合的索引
+    int current_row_idx = 0; 
 
-    while (current_row_idx < sets_cnt) { // 循环直到找到并填充了 sets_cnt (即16个) 不同的Row
+    while (current_row_idx < sets_cnt) { 
         addr_tuple base_addr_tuple;
         bool new_base_found = false;
 
-        // 1. 寻找一个位于 Bank 0 且尚未被识别为新 Row 的基础地址
         while (!new_base_found) {
             char* base_v_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
             base_addr_tuple = gen_addr_tuple(base_v_addr);
 
-            // 检查地址是否在 Bank 0
             if (which_bank(base_addr_tuple.p_addr) == 0) {
-                // 检查此物理地址是否已作为其他 Row 的基础地址
                 bool is_unique_base_p_addr = true;
                 for (const auto& existing_p_addr : identified_base_row_p_addrs) {
                     if (existing_p_addr == base_addr_tuple.p_addr) {
@@ -214,32 +298,27 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
                 }
 
                 if (is_unique_base_p_addr) {
-                    active_base_rows.push_back(base_addr_tuple); // 记录这个基础地址元组
-                    identified_base_row_p_addrs.push_back(base_addr_tuple.p_addr); // 记录物理地址用于判重
-                    // 修改 push_back 调用
-                    row_sets[current_row_idx].push_back(base_addr_tuple); // 将基础地址添加到自己的集合中
+                    active_base_rows.push_back(base_addr_tuple); 
+                    identified_base_row_p_addrs.push_back(base_addr_tuple.p_addr); 
+                    row_sets[current_row_idx].push_back(base_addr_tuple); 
                     new_base_found = true;
-                    verbose_printerr("[LOG] - Found new base address for Row %d: v_addr: %p, p_addr: %lx\n",
+                    // 精简输出
+                    verbose_printerr("[LOG] - Found base for Row %d: VAddr: %p, PAddr: %lx\n",
                                      current_row_idx, base_addr_tuple.v_addr, base_addr_tuple.p_addr);
                 }
             }
         }
 
-        // 2. 填充当前 Row 集合，直到其地址数量达到 SET_SIZE
         while (row_sets[current_row_idx].size() < SET_SIZE) {
             char* probe_v_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
             addr_tuple probe_addr_tuple = gen_addr_tuple(probe_v_addr);
 
-            // 确保探测地址也在 Bank 0
             if (which_bank(probe_addr_tuple.p_addr) == 0) {
-                // 跳过与基础地址相同的地址，避免重复
                 if (probe_addr_tuple.p_addr == base_addr_tuple.p_addr) {
                     continue;
                 }
 
-                // 检查探测地址是否已在当前集合中，避免重复添加
                 bool already_in_set = false;
-                // 修改 for 循环中的类型推断
                 for (const auto& existing_tuple : row_sets[current_row_idx]) {
                     if (existing_tuple.p_addr == probe_addr_tuple.p_addr) {
                         already_in_set = true;
@@ -250,25 +329,39 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
                     continue;
                 }
 
-                // 测量基础地址和探测地址之间的时延
                 uint64_t latency = time_tuple(base_addr_tuple.v_addr, probe_addr_tuple.v_addr, rounds);
 
-                // 如果时延小于阈值，则认为它们在同一Row，添加到集合中
                 if (latency < threshold) {
-                    // 修改 push_back 调用
                     row_sets[current_row_idx].push_back(probe_addr_tuple);
-                    verbose_printerr("[LOG] - Added v_addr: %p (p_addr: %lx) to Row %d (base p_addr: %lx), Latency: %lu\n",
-                                     probe_addr_tuple.v_addr, probe_addr_tuple.p_addr, current_row_idx, base_addr_tuple.p_addr, latency);
+                    // 移除此处的详细输出
                 }
             }
         }
-        current_row_idx++; // 移动到下一个要填充的Row
+        // 每个集合完成后，输出其总结信息
+        verbose_printerr("[LOG] - Row %d completed. Base VAddr: %p, Base PAddr: %lx, Total Addresses: %zu\n",
+                         current_row_idx, base_addr_tuple.v_addr, base_addr_tuple.p_addr, row_sets[current_row_idx].size());
+        current_row_idx++; 
     }
 
-    //打印收集到的Row集合信息
     if (flags & F_VERBOSE) {
-        print_sets(row_sets, flags); // 传递flags
+        print_sets(row_sets, flags); 
     }
+    
+    // 在进行 Row 掩码破解前，提示用户敲击回车
+    if (flags & F_VERBOSE) {
+        printf("\nPress ENTER to continue with row mask cracking...\n");
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF);
+    }
+
+    std::vector<uint64_t> bank_functions_for_row_crack = {
+        Bank0_addr,
+        Bank1_addr,
+        Bank2_addr,
+        Bank3_addr
+    };
+
+    find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
 
     free_buffer(&mem);
 }
@@ -290,17 +383,15 @@ bool is_in(char* val, std::vector<char*> arr) {
 
 //----------------------------------------------------------
 // 用于输出不同Row集合的地址对
-// 修改 print_sets 的函数定义
 void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, uint64_t flags) {
 
     for (int idx = 0; idx < NUM_DRAM_BANKS; idx++) {
-        // 确保只打印有实际收集到地址的集合
         if (!sets_array[idx].empty()) {
             verbose_printerr("[LOG] - ROW %d\tSize: %ld\n", idx, sets_array[idx].size());    
-            // 修改 for 循环中的类型推断
             for (const auto& tmp: sets_array[idx]) {
                 verbose_printerr("\tv_addr:%p - p_addr:%p\n", tmp.v_addr, (void*) tmp.p_addr);
             }
         }
     }    
 }
+
