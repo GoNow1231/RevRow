@@ -23,9 +23,8 @@
 #define LS_BITMASK(X)  ((1LL<<(X))-1LL) // Mask only the lower X bits，仅保存低x位
 
 
-#define SET_SIZE 100 // 每个bank至少需要这么多的地址用于row function解析
-
-#define NUM_DRAM_BANKS 16//注意与main.c的SETS_std保持一致
+#define SET_SIZE 50 // 每个row至少需要这么多的地址用于集合
+#define NUM_DRAM_BANKS 16 // 仍保留为16，但在此语境下表示需要找到的行集合数量
 
 #define Bank0_addr ((1ULL << 7) ^ (1ULL << 14))  // 0x2040 (a_6 ^ a_13)
 #define Bank1_addr ((1ULL << 15) ^ (1ULL << 18)) // 0x24000 (a_14 ^ a_17)
@@ -42,39 +41,36 @@
 typedef std::vector<addr_tuple> set_t; //定义一个存放addr_tuple地址对的集合体，存放存在bank conflict的地址
 
 //-------------------------------------------
-//3个Helper函数
+//2个Helper函数 (found_enough 已移除)
 bool is_in(char* val, std::vector<char*> arr);
-bool found_enough(set_t* sets_array, uint64_t set_cnt, size_t set_size);
-void print_sets(set_t* sets_array);
-// bool found_enough(std::vector<set_t>* sets_array, uint64_t set_cnt, size_t set_size);
-// void print_sets(std::vector<set_t>* sets_array);
+void print_sets(std::vector<set_t>* sets_array, uint64_t flags); // 增加flags参数以便在函数内部使用verbose_printerr
 
 //-------------------------------------------
 //返回两个地址访问之间的延迟(CPU时钟周期)，若a1和a2位于同一BANK或row，时间会变长
 //本版本暂时用不到，但是在row function解析时会用到
-// uint64_t time_tuple(volatile char* a1, volatile char* a2, size_t rounds) {
-// //volatile防止编译器优化,保证每次读取都是从内存中读的,而非从寄存器中读取
-//     uint64_t* time_vals = (uint64_t*) calloc(rounds, sizeof(uint64_t));//相对于malloc,会把分配的所有内存bit设置是0
-//     uint64_t t0;
-//     sched_yield();//主动让出CPU,减少上下文切换对测量的干扰
-//     for (size_t i = 0; i < rounds; i++) {
-//         mfence();//内存加锁
-//         t0 = rdtscp();//记录时钟周期
-//         //交替访问
-//         *a1;
-//         *a2;
-//         time_vals[i] = rdtscp() - t0; //记录延迟
-//         lfence();//内存解锁
-//         //从cache中清除,保证下次是从内存中加载的1
-//         clflush(a1);
-//         clflush(a2);
+uint64_t time_tuple(volatile char* a1, volatile char* a2, size_t rounds) {
+//volatile防止编译器优化,保证每次读取都是从内存中读的,而非从寄存器中读取
+    uint64_t* time_vals = (uint64_t*) calloc(rounds, sizeof(uint64_t));//相对于malloc,会把分配的所有内存bit设置是0
+    uint64_t t0;
+    sched_yield();//主动让出CPU,减少上下文切换对测量的干扰
+    for (size_t i = 0; i < rounds; i++) {
+        mfence();//内存加锁
+        t0 = rdtscp();//记录时钟周期
+        //交替访问
+        *a1;
+        *a2;
+        time_vals[i] = rdtscp() - t0; //记录延迟
+        lfence();//内存解锁
+        //从cache中清除,保证下次是从内存中加载的1
+        clflush(a1);
+        clflush(a2);
 
-//     }
+    }
 
-//     uint64_t mdn = median(time_vals, rounds);////多rounds取中位数来减少噪声干扰
-//     free(time_vals);
-//     return mdn;
-// }
+    uint64_t mdn = median(time_vals, rounds);//多rounds取中位数来减少噪声干扰
+    free(time_vals);
+    return mdn;
+}
 
 //----------------------------------------------------------
 //生成一个随机的,按照指定字节数对齐的内存地址，没看懂
@@ -135,7 +131,7 @@ std::vector<uint8_t> get_dram_fn(uint64_t addr, std::vector<uint64_t> fn_masks) 
 }
 
 //----------------------------------------------------------
-//通过bank function来查找地址对应的bank号码
+//通过bank function来查找地址对应的bank号码 (此函数仍用于筛选 Bank 0 地址)
 int which_bank(uint64_t p_addr){
 
     std::vector<uint64_t> bank_functions = {
@@ -167,9 +163,9 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     int o_fd = 0;//输出文件
     int huge_fd = 0;
 
-    // std::vector<set_t> sets[NUM_DRAM_BANKS];//set的集合
-    set_t sets[NUM_DRAM_BANKS];//set的集合
-    std::vector<char*> used_addr;//记录已经使用过的地址,放置重复采样
+    std::vector<set_t> row_sets[NUM_DRAM_BANKS]; // 用于存储16个Row的地址集合
+    std::vector<addr_tuple> active_base_rows; // 存储已找到的16个Row的基础地址 (v_addr, p_addr)
+    std::vector<uint64_t> identified_base_row_p_addrs; // 存储已找到的16个Row的基础物理地址（用于判重）
 
     //time获得一个long int(UNIX时间戳);
     srand((unsigned) time(&t));//根据当前时间随机生成数字,保证地址采样的随机性
@@ -194,37 +190,80 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
 
     alloc_buffer(&mem);//完成内存缓冲区的占用,大小是m_size,默认是5GB,需要考量这个是否真的分配了这么多有效的地址
 
-    int bank_num;
+    int current_row_idx = 0; // 当前正在填充的Row集合的索引
 
-    while (!found_enough(sets, sets_cnt, SET_SIZE)) {
-        //生成一个随机地址地址对
-        char* rnd_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
-        if (is_in(rnd_addr, used_addr))
-            continue;
+    while (current_row_idx < sets_cnt) { // 循环直到找到并填充了 sets_cnt (即16个) 不同的Row
+        addr_tuple base_addr_tuple;
+        bool new_base_found = false;
 
-        used_addr.push_back(rnd_addr);
+        // 1. 寻找一个位于 Bank 0 且尚未被识别为新 Row 的基础地址
+        while (!new_base_found) {
+            char* base_v_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
+            base_addr_tuple = gen_addr_tuple(base_v_addr);
 
-        addr_tuple tp = gen_addr_tuple(rnd_addr);
-        
-        //进行检索，查看这个地址应该添加到哪个bank集合中
-        bank_num = which_bank(tp.p_addr);
+            // 检查地址是否在 Bank 0
+            if (which_bank(base_addr_tuple.p_addr) == 0) {
+                // 检查此物理地址是否已作为其他 Row 的基础地址
+                bool is_unique_base_p_addr = true;
+                for (const auto& existing_p_addr : identified_base_row_p_addrs) {
+                    if (existing_p_addr == base_addr_tuple.p_addr) {
+                        is_unique_base_p_addr = false;
+                        break;
+                    }
+                }
 
-        //根据bank_num，把这个addr_tuple tp添加到对应的sets里
-        // 确保 bank_num 在有效范围内，防止越界访问
-        if ((bank_num >= 0) && (bank_num < NUM_DRAM_BANKS)) {
-            // 直接将地址对添加到对应 Bank 的集合中
-            sets[bank_num].push_back(tp);
-            // 打印日志，指示地址被添加到哪个 Bank
-            verbose_printerr("[LOG] - Added %p (p_addr: %lx) to Bank %d\n", tp.v_addr, tp.p_addr, bank_num);
-        } else {
-            verbose_printerr("[LOG] - Added %p (p_addr: %lx) has wrong!!!!!\n", tp.v_addr, tp.p_addr, bank_num);
-            exit(1);
+                if (is_unique_base_p_addr) {
+                    active_base_rows.push_back(base_addr_tuple); // 记录这个基础地址元组
+                    identified_base_row_p_addrs.push_back(base_addr_tuple.p_addr); // 记录物理地址用于判重
+                    row_sets[current_row_idx].push_back(base_addr_tuple); // 将基础地址添加到自己的集合中
+                    new_base_found = true;
+                    verbose_printerr("[LOG] - Found new base address for Row %d: v_addr: %p, p_addr: %lx\n",
+                                     current_row_idx, base_addr_tuple.v_addr, base_addr_tuple.p_addr);
+                }
+            }
         }
+
+        // 2. 填充当前 Row 集合，直到其地址数量达到 SET_SIZE
+        while (row_sets[current_row_idx].size() < SET_SIZE) {
+            char* probe_v_addr = get_rnd_addr(mem.buffer, mem.size, CL_SHIFT);
+            addr_tuple probe_addr_tuple = gen_addr_tuple(probe_v_addr);
+
+            // 确保探测地址也在 Bank 0
+            if (which_bank(probe_addr_tuple.p_addr) == 0) {
+                // 跳过与基础地址相同的地址，避免重复
+                if (probe_addr_tuple.p_addr == base_addr_tuple.p_addr) {
+                    continue;
+                }
+
+                // 检查探测地址是否已在当前集合中，避免重复添加
+                bool already_in_set = false;
+                for (const auto& existing_tuple : row_sets[current_row_idx]) {
+                    if (existing_tuple.p_addr == probe_addr_tuple.p_addr) {
+                        already_in_set = true;
+                        break;
+                    }
+                }
+                if (already_in_set) {
+                    continue;
+                }
+
+                // 测量基础地址和探测地址之间的时延
+                uint64_t latency = time_tuple(base_addr_tuple.v_addr, probe_addr_tuple.v_addr, rounds);
+
+                // 如果时延小于阈值，则认为它们在同一Row，添加到集合中
+                if (latency < threshold) {
+                    row_sets[current_row_idx].push_back(probe_addr_tuple);
+                    verbose_printerr("[LOG] - Added v_addr: %p (p_addr: %lx) to Row %d (base p_addr: %lx), Latency: %lu\n",
+                                     probe_addr_tuple.v_addr, probe_addr_tuple.p_addr, current_row_idx, base_addr_tuple.p_addr, latency);
+                }
+            }
+        }
+        current_row_idx++; // 移动到下一个要填充的Row
     }
 
-    //打印
+    //打印收集到的Row集合信息
     if (flags & F_VERBOSE) {
-        print_sets(sets);
+        print_sets(row_sets, flags); // 传递flags
     }
 
     free_buffer(&mem);
@@ -246,34 +285,38 @@ bool is_in(char* val, std::vector<char*> arr) {
 }
 
 //----------------------------------------------------------
-//如果 found_sets 超过预期数量 set_cnt，报错并退出程序,set_size自定义，为每个bank想要的地址数目
-bool found_enough(set_t* sets_array, uint64_t set_cnt, size_t set_size) {
-
-    size_t found_sets = 0;
-    
-    //遍历查看所有的set,统计set的大小比set_size大的set数字
-    for (int i = 0; i < NUM_DRAM_BANKS; i++) {
-        set_t& curr_set = sets_array[i];
-        if (curr_set.size() >= set_size) {
-            found_sets += 1;
-        }
-    }
-
-    if (found_sets > set_cnt) {
-        fprintf(stderr, "[ERROR] - Found too many sets. Is %ld the correct number of sets?\n", set_cnt);
-        exit(1);
-    } 
-    //
-    return (found_sets == set_cnt) ? true : false;
-}
-
-//用于输出不同集合的地址对
-void print_sets(set_t* sets_array) {
+// 用于输出不同Row集合的地址对
+void print_sets(std::vector<set_t>* sets_array, uint64_t flags) {
 
     for (int idx = 0; idx < NUM_DRAM_BANKS; idx++) {
-        fprintf(stderr, "[LOG] - BANK: %d\tSize: %ld\n", idx, sets_array[idx].size());    
-        for (auto tmp: sets_array[idx]) {
-            fprintf(stderr, "\tv_addr:%p - p_addr:%p\n", tmp.v_addr, (void*) tmp.p_addr);
+        // 确保只打印有实际收集到地址的集合
+        if (!sets_array[idx].empty()) {
+            verbose_printerr("[LOG] - ROW %d\tSize: %ld\n", idx, sets_array[idx].size());    
+            for (auto tmp: sets_array[idx]) {
+                verbose_printerr("\tv_addr:%p - p_addr:%p\n", tmp.v_addr, (void*) tmp.p_addr);
+            }
         }
     }    
 }
+
+//----------------------------------------------------------
+//如果 found_sets 超过预期数量 set_cnt，报错并退出程序,set_size自定义，为每个bank想要的地址数目
+// bool found_enough(set_t* sets_array, uint64_t set_cnt, size_t set_size) {
+
+//     size_t found_sets = 0;
+    
+//     //遍历查看所有的set,统计set的大小比set_size大的set数字
+//     for (int i = 0; i < NUM_DRAM_BANKS; i++) {
+//         set_t& curr_set = sets_array[i];
+//         if (curr_set.size() >= set_size) {
+//             found_sets += 1;
+//         }
+//     }
+
+//     if (found_sets > set_cnt) {
+//         fprintf(stderr, "[ERROR] - Found too many sets. Is %ld the correct number of sets?\n", set_cnt);
+//         exit(1);
+//     } 
+//     //
+//     return (found_sets == set_cnt) ? true : false;
+// }
