@@ -48,7 +48,7 @@
  * 且该整数拥有与 `v` 相同数量的设置（1）位。
  * 例如，如果 `v` 是一个二进制表示中包含 K 个 1 的数，此函数将返回下一个
  * 拥有 K 个 1 的更大的数。当所有具有 K 个 1 的组合都被遍历后，它可能会返回一个
- * 意想不到的大数（或0，取决于实现和输入）。
+ * 拥有 K 个 1 的更大的数。
  *
  * @param v 输入的无符号64位整数。
  * @return 具有与 `v` 相同数量设置位但值更大的下一个整数。
@@ -69,7 +69,7 @@ struct HighModeEntry {
 //2个Helper函数
 bool is_in(char* val, std::vector<char*> arr);
 // 修改 print_sets 的函数声明，匹配 find_row_function 的参数类型
-void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, uint64_t flags); 
+void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, size_t rounds, uint64_t flags); 
 
 //-------------------------------------------
 //返回两个地址访问之间的延迟(CPU时钟周期)，若a1和a2位于同一BANK或row，时间会变长
@@ -204,7 +204,7 @@ void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std
             if (addr_pool.empty()) {
                 verbose_printerr("  [WARN] - Row Set %zu is empty. Skipping.\n", set_idx);
                 continue;
-            }   
+            }
 
             std::map<uint64_t, int> masked_value_counts;
             uint64_t current_mode_value = 0;
@@ -212,7 +212,7 @@ void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std
 
             for (const auto& addr_entry : addr_pool) {
                 uint64_t masked_val = addr_entry.p_addr & row_mask;
-                masked_value_counts[masked_  val]++;
+                masked_value_counts[masked_val]++;
             }
 
             for (const auto& pair : masked_value_counts) {
@@ -268,83 +268,6 @@ void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std
         }
     }
     verbose_printerr("~~~~~~~~~~ Detailed Results Output Complete ~~~~~~~~~~\n");
-}
-
-void drama_find_row_mask(std::vector<set_t>& sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, uint64_t flags) {
-
-
-
-    addr_tuple base_addr = gen_addr_tuple(get_rnd_addr(mem.buffer, mem.size, 0));
-    std::vector<set_t> same_row_sets;
-
-    verbose_printerr("~~~~~~~~~~ Looking for row bits ~~~~~~~~~~\n");
-
-
-    for (int i = 0; i < 2; i++) {
-        verbose_printerr("[LOG] - Set #%d\n", i);
-        addr_tuple base_addr = sets[i][0];
-        std::vector<uint8_t> base_dram = get_dram_fn((uint64_t)base_addr.p_addr, fn_masks);
-        same_row_sets.push_back({base_addr});
-        uint64_t cnt = 0;
-        while (cnt < ROW_SET_CNT) {
-
-            addr_tuple tmp = gen_addr_tuple(get_rnd_addr(mem.buffer, mem.size, 0));
-            if (get_dram_fn((uint64_t) tmp.p_addr, fn_masks) != base_dram) 
-                continue;
-
-            uint64_t time = time_tuple((volatile char*)base_addr.v_addr, (volatile char*)tmp.v_addr, 1000);
-            
-            if (time > threshold) 
-		continue;
-
-            
-	    verbose_printerr("[LOG] - %lx - %lx\t Time: %ld <== GOTCHA\n", base_addr.p_addr, tmp.p_addr, time);
-            
-            same_row_sets[i].push_back(tmp);
-            cnt++;            
-        }
-    }
-    
-    
-
-
-    uint64_t row_mask = LS_BITMASK(16); // use 16 bits for the row
-    uint64_t last_mask = (row_mask<<(40-16));
-    row_mask <<= CL_SHIFT; // skip the lowest 6 bits since they're used for CL addressing
-
-    while (row_mask < last_mask) {
-        if (row_mask & LS_BITMASK(CL_SHIFT)){
-                row_mask = next_bit_permutation(row_mask);
-                continue;
-        }
-
-        for (auto addr_pool:same_row_sets) {
-            addr_tuple base_addr = addr_pool[0];
-            for (int i = 1; i < addr_pool.size(); i++) {
-                addr_tuple tmp = addr_pool[i];
-                if ((tmp.p_addr & row_mask) != (base_addr.p_addr & row_mask)) {
-                    goto next_mask;
-                }
-            }
-    
-        }
-        
-        break;
-
-        next_mask:
-        row_mask = next_bit_permutation(row_mask);
-    }
-  	
-   // super hackish way to recover the real row mask  
-    for (auto m:fn_masks) {
-	uint64_t lsb = (1<<(__builtin_ctzl(m)+1));
-	if (lsb & row_mask) {
-    		row_mask ^= (1<<__builtin_ctzl(m));
-	}
-    }
-    verbose_printerr("[LOG] - Row mask: 0x%0lx \t\t bits: %s\n", row_mask, bit_string(row_mask));	
-    printf("0x%lx\n", row_mask);
-
 }
 
 //----------------------------------------------------------
@@ -446,7 +369,8 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
     }
 
     if (flags & F_VERBOSE) {
-        print_sets(row_sets, flags); 
+        // 更新此处，传递 rounds 参数
+        print_sets(row_sets, rounds, flags); 
     }
     
     // 在进行 Row 掩码破解前，提示用户敲击回车
@@ -463,8 +387,8 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
         Bank3_addr
     };
 
-    //find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
-    drama_find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
+    find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
+
     free_buffer(&mem);
 }
 
@@ -484,14 +408,21 @@ bool is_in(char* val, std::vector<char*> arr) {
 }
 
 //----------------------------------------------------------
-// 用于输出不同Row集合的地址对
-void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, uint64_t flags) {
+// 用于输出不同Row集合的地址对 (更新此处，接收 rounds 参数)
+void print_sets(const std::vector<std::vector<addr_tuple>>& sets_array, size_t rounds, uint64_t flags) {
 
     for (int idx = 0; idx < NUM_DRAM_BANKS; idx++) {
         if (!sets_array[idx].empty()) {
             verbose_printerr("[LOG] - ROW %d\tSize: %ld\n", idx, sets_array[idx].size());    
+            
+            // 获取当前Row集合的基地址（第一个地址）
+            char* base_v_addr_in_set = sets_array[idx][0].v_addr;
+
             for (const auto& tmp: sets_array[idx]) {
-                verbose_printerr("\tv_addr:%p - p_addr:%p\n", tmp.v_addr, (void*) tmp.p_addr);
+                // 计算当前地址与集合基地址之间的访问时延
+                uint64_t latency = time_tuple(base_v_addr_in_set, tmp.v_addr, rounds);
+                verbose_printerr("\tv_addr:%p - p_addr:%p - Latency to Base: %lu\n", 
+                                 tmp.v_addr, (void*) tmp.p_addr, latency);
             }
         }
     }    
