@@ -270,6 +270,83 @@ void find_row_function(const std::vector<std::vector<addr_tuple>>& row_sets, std
     verbose_printerr("~~~~~~~~~~ Detailed Results Output Complete ~~~~~~~~~~\n");
 }
 
+void drama_find_row_mask(std::vector<set_t>& sets, std::vector<uint64_t> fn_masks, mem_buff_t mem, uint64_t threshold, uint64_t flags) {
+
+
+
+    addr_tuple base_addr = gen_addr_tuple(get_rnd_addr(mem.buffer, mem.size, 0));
+    std::vector<set_t> same_row_sets;
+
+    verbose_printerr("~~~~~~~~~~ Looking for row bits ~~~~~~~~~~\n");
+
+
+    for (int i = 0; i < 2; i++) {
+        verbose_printerr("[LOG] - Set #%d\n", i);
+        addr_tuple base_addr = sets[i][0];
+        std::vector<uint8_t> base_dram = get_dram_fn((uint64_t)base_addr.p_addr, fn_masks);
+        same_row_sets.push_back({base_addr});
+        uint64_t cnt = 0;
+        while (cnt < ROW_SET_CNT) {
+
+            addr_tuple tmp = gen_addr_tuple(get_rnd_addr(mem.buffer, mem.size, 0));
+            if (get_dram_fn((uint64_t) tmp.p_addr, fn_masks) != base_dram) 
+                continue;
+
+            uint64_t time = time_tuple((volatile char*)base_addr.v_addr, (volatile char*)tmp.v_addr, 1000);
+            
+            if (time > threshold) 
+		continue;
+
+            
+	    verbose_printerr("[LOG] - %lx - %lx\t Time: %ld <== GOTCHA\n", base_addr.p_addr, tmp.p_addr, time);
+            
+            same_row_sets[i].push_back(tmp);
+            cnt++;            
+        }
+    }
+    
+    
+
+
+    uint64_t row_mask = LS_BITMASK(16); // use 16 bits for the row
+    uint64_t last_mask = (row_mask<<(40-16));
+    row_mask <<= CL_SHIFT; // skip the lowest 6 bits since they're used for CL addressing
+
+    while (row_mask < last_mask) {
+        if (row_mask & LS_BITMASK(CL_SHIFT)){
+                row_mask = next_bit_permutation(row_mask);
+                continue;
+        }
+
+        for (auto addr_pool:same_row_sets) {
+            addr_tuple base_addr = addr_pool[0];
+            for (int i = 1; i < addr_pool.size(); i++) {
+                addr_tuple tmp = addr_pool[i];
+                if ((tmp.p_addr & row_mask) != (base_addr.p_addr & row_mask)) {
+                    goto next_mask;
+                }
+            }
+    
+        }
+        
+        break;
+
+        next_mask:
+        row_mask = next_bit_permutation(row_mask);
+    }
+  	
+   // super hackish way to recover the real row mask  
+    for (auto m:fn_masks) {
+	uint64_t lsb = (1<<(__builtin_ctzl(m)+1));
+	if (lsb & row_mask) {
+    		row_mask ^= (1<<__builtin_ctzl(m));
+	}
+    }
+    verbose_printerr("[LOG] - Row mask: 0x%0lx \t\t bits: %s\n", row_mask, bit_string(row_mask));	
+    printf("0x%lx\n", row_mask);
+
+}
+
 //----------------------------------------------------------
 void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, char* o_file, uint64_t flags) {    
 
@@ -386,8 +463,8 @@ void rev_mc(size_t sets_cnt, size_t threshold, size_t rounds, size_t m_size, cha
         Bank3_addr
     };
 
-    find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
-
+    //find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
+    drama_find_row_function(row_sets, bank_functions_for_row_crack, mem, threshold, rounds, flags);
     free_buffer(&mem);
 }
 
